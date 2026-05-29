@@ -110,8 +110,30 @@ const server = new Server(
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const { name, arguments: args = {} } = req.params;
+  // Image generation can run longer than the MCP client's default
+  // request timeout (~60s) — gpt-image-2 occasionally takes that long.
+  // Emit periodic progress notifications so clients that honor
+  // resetTimeoutOnProgress (Claude Desktop, Cursor, …) keep waiting
+  // instead of cancelling a generation that's still in flight (and being
+  // billed). No-ops when the client didn't supply a progressToken.
+  const progressToken = extra && extra._meta ? extra._meta.progressToken : undefined;
+  let ticker = null;
+  let beats = 0;
+  if (progressToken != null) {
+    const beat = () => {
+      beats += 1;
+      Promise.resolve(
+        extra.sendNotification({
+          method: 'notifications/progress',
+          params: { progressToken, progress: beats, message: 'Generating…' },
+        }),
+      ).catch(() => {});
+    };
+    beat(); // immediate, then heartbeat
+    ticker = setInterval(beat, 4000);
+  }
   try {
     if (!API_KEY) {
       throw new Error('AURIXEL_API_KEY is not set. Add your ck-… key (from app.joyviz.ai/app/keys) to the MCP server env.');
@@ -132,6 +154,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     throw new Error(`Unknown tool: ${name}`);
   } catch (e) {
     return { content: [{ type: 'text', text: `Error: ${(e && e.message) || String(e)}` }], isError: true };
+  } finally {
+    if (ticker) clearInterval(ticker);
   }
 });
 
