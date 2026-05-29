@@ -26,7 +26,7 @@ something and get the picture back inline.
   "mcpServers": {
     "aurixel": {
       "command": "npx",
-      "args": ["-y", "aurixel-mcp"],
+      "args": ["-y", "github:bifrost-studio/aurixel-mcp"],
       "env": { "AURIXEL_API_KEY": "ck-your-key-here" }
     }
   }
