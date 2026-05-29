@@ -1,0 +1,18 @@
+{
+  "name": "aurixel-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that exposes Aurixel (joyviz.ai) image generation as a tool for Claude Desktop, Cursor, and other MCP hosts.",
+  "type": "module",
+  "bin": {
+    "aurixel-mcp": "server.js"
+  },
+  "files": [
+    "server.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
