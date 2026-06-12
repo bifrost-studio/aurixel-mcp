@@ -1,7 +1,7 @@
 {
   "name": "aurixel-mcp",
-  "version": "0.1.0",
-  "description": "MCP server that exposes Aurixel (joyviz.ai) image generation as a tool for Claude Desktop, Cursor, and other MCP hosts.",
+  "version": "0.2.0",
+  "description": "MCP server that exposes Aurixel (joyviz.ai) image generation as a tool for Claude Desktop, Cursor, and other MCP hosts. Async job + poll so long generations never hit the host's tool-call timeout.",
   "type": "module",
   "bin": {
     "aurixel-mcp": "server.js"

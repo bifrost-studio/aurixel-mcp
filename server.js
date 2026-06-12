@@ -12,8 +12,18 @@
  *   AURIXEL_IMAGE_MODEL optional — default image model (default gpt-image-2)
  *
  * Tools:
- *   generate_image(prompt, model?, size?)  → returns the image inline
+ *   generate_image(prompt, model?, size?)  → starts a job, returns a job_id
+ *   get_image_result(job_id)               → fetches the image when ready
  *   list_image_models()                    → image models you can pass
+ *
+ * Why async (job_id + poll) instead of returning the image inline?
+ * gpt-image-2 takes 60–120s, but MCP hosts cancel any single tool call at
+ * a fixed ~60s timeout (DEFAULT_REQUEST_TIMEOUT_MSEC) that progress
+ * notifications do NOT reliably reset. So we decouple the long generation
+ * from the tool-call duration: generate_image returns instantly with a
+ * job_id, the fetch runs in the background, and get_image_result returns
+ * the picture once it's ready. Each tool call stays well under the host's
+ * timeout, so generations never get cut off (and billed) mid-flight.
  *
  * Why the low-level Server API (not the high-level McpServer.tool helper):
  * setRequestHandler + JSON-Schema input has been stable across SDK 1.x,
@@ -23,6 +33,7 @@
  * IMPORTANT: stdout is the JSON-RPC channel — never console.log there.
  * All diagnostics go to stderr.
  */
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -30,6 +41,14 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 const BASE_URL = (process.env.AURIXEL_BASE_URL || 'https://conduit-api.joyviz.ai').replace(/\/+$/, '');
 const API_KEY = process.env.AURIXEL_API_KEY || '';
 const DEFAULT_IMAGE_MODEL = process.env.AURIXEL_IMAGE_MODEL || 'gpt-image-2';
+
+// Hard ceiling on a single upstream generation before we give up on it.
+const GEN_TIMEOUT_MS = 180000;
+// How long get_image_result waits in-call for a pending job before
+// returning "still generating". Must stay comfortably under the host's
+// ~60s tool-call timeout so the poll itself never times out. Picking 30s
+// means a 90s generation is fetched in ~3 polls instead of dozens.
+const POLL_WAIT_MS = 30000;
 
 function authHeaders() {
   return { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' };
@@ -39,9 +58,12 @@ const TOOLS = [
   {
     name: 'generate_image',
     description:
-      "Generate an image from a text prompt using Aurixel's image models " +
-      '(e.g. gpt-image-2). Returns the generated image inline. Use this when ' +
-      'the user asks to draw, create, or generate a picture/illustration/logo.',
+      "Start generating an image from a text prompt using Aurixel's image " +
+      'models (e.g. gpt-image-2). Returns a job_id immediately (generation ' +
+      'runs in the background and typically takes 60–120s). Then call ' +
+      'get_image_result with the job_id to fetch the finished image. Use ' +
+      'this when the user asks to draw, create, or generate a ' +
+      'picture/illustration/logo.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -53,37 +75,101 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_image_result',
+    description:
+      'Fetch the image for a job_id returned by generate_image. If the ' +
+      'image is ready it is returned inline. If it is still generating, ' +
+      'this returns a "still generating" message — just call ' +
+      'get_image_result again with the same job_id after a few seconds. ' +
+      'Each call is fast and will not time out.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        job_id: { type: 'string', description: 'The job_id returned by generate_image.' },
+      },
+      required: ['job_id'],
+    },
+  },
+  {
     name: 'list_image_models',
     description: 'List the image-generation models available on Aurixel that you can pass to generate_image.',
     inputSchema: { type: 'object', properties: {} },
   },
 ];
 
+// jobId -> { status: 'pending'|'done'|'error', model, startedAt, b64?, mime?, error? }
+const jobs = new Map();
+
 async function generateImage({ prompt, model, size }) {
   if (!prompt || !String(prompt).trim()) throw new Error('prompt is required.');
   const useModel = model || DEFAULT_IMAGE_MODEL;
-  const r = await fetch(`${BASE_URL}/v1/images/generations`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ model: useModel, prompt, n: 1, ...(size ? { size } : {}) }),
-  });
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`Image generation failed (HTTP ${r.status}). ${text.slice(0, 300)}`);
+  // Abort a genuinely-stuck upstream request instead of leaking a job that
+  // stays 'pending' forever.
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), GEN_TIMEOUT_MS);
+  try {
+    const r = await fetch(`${BASE_URL}/v1/images/generations`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ model: useModel, prompt, n: 1, ...(size ? { size } : {}) }),
+      signal: ac.signal,
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(`Image generation failed (HTTP ${r.status}). ${text.slice(0, 300)}`);
+    }
+    const json = await r.json();
+    const first = json?.data?.[0];
+    if (!first) throw new Error('Upstream returned no image.');
+    let b64 = first.b64_json || null;
+    let mime = 'image/png';
+    if (!b64 && first.url) {
+      const ir = await fetch(first.url);
+      if (!ir.ok) throw new Error(`Could not fetch the generated image URL (HTTP ${ir.status}).`);
+      mime = ir.headers.get('content-type') || mime;
+      b64 = Buffer.from(await ir.arrayBuffer()).toString('base64');
+    }
+    if (!b64) throw new Error('No image data in upstream response.');
+    return { b64, mime, model: useModel };
+  } finally {
+    clearTimeout(to);
   }
-  const json = await r.json();
-  const first = json?.data?.[0];
-  if (!first) throw new Error('Upstream returned no image.');
-  let b64 = first.b64_json || null;
-  let mime = 'image/png';
-  if (!b64 && first.url) {
-    const ir = await fetch(first.url);
-    if (!ir.ok) throw new Error(`Could not fetch the generated image URL (HTTP ${ir.status}).`);
-    mime = ir.headers.get('content-type') || mime;
-    b64 = Buffer.from(await ir.arrayBuffer()).toString('base64');
+}
+
+// Kick off a generation in the background and return its job_id immediately.
+function startJob(args) {
+  const jobId = randomUUID();
+  const useModel = args.model || DEFAULT_IMAGE_MODEL;
+  jobs.set(jobId, { status: 'pending', model: useModel, startedAt: Date.now() });
+  generateImage(args)
+    .then(({ b64, mime, model }) => {
+      const j = jobs.get(jobId);
+      if (!j) return;
+      j.status = 'done';
+      j.b64 = b64;
+      j.mime = mime;
+      j.model = model;
+    })
+    .catch((e) => {
+      const j = jobs.get(jobId);
+      if (!j) return;
+      j.status = 'error';
+      j.error = (e && e.message) || String(e);
+    });
+  return { jobId, useModel };
+}
+
+const elapsedSec = (j) => Math.round((Date.now() - j.startedAt) / 1000);
+
+// Wait (in-call) up to sliceMs for a pending job to settle, polling cheaply.
+async function waitForJob(jobId, sliceMs) {
+  const j = jobs.get(jobId);
+  if (!j) return null;
+  const deadline = Date.now() + sliceMs;
+  while (j.status === 'pending' && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  if (!b64) throw new Error('No image data in upstream response.');
-  return { b64, mime, model: useModel };
+  return j;
 }
 
 async function listImageModels() {
@@ -104,45 +190,62 @@ async function listImageModels() {
 }
 
 const server = new Server(
-  { name: 'aurixel', version: '0.1.0' },
+  { name: 'aurixel', version: '0.2.0' },
   { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
+server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
-  // Image generation can run longer than the MCP client's default
-  // request timeout (~60s) — gpt-image-2 occasionally takes that long.
-  // Emit periodic progress notifications so clients that honor
-  // resetTimeoutOnProgress (Claude Desktop, Cursor, …) keep waiting
-  // instead of cancelling a generation that's still in flight (and being
-  // billed). No-ops when the client didn't supply a progressToken.
-  const progressToken = extra && extra._meta ? extra._meta.progressToken : undefined;
-  let ticker = null;
-  let beats = 0;
-  if (progressToken != null) {
-    const beat = () => {
-      beats += 1;
-      Promise.resolve(
-        extra.sendNotification({
-          method: 'notifications/progress',
-          params: { progressToken, progress: beats, message: 'Generating…' },
-        }),
-      ).catch(() => {});
-    };
-    beat(); // immediate, then heartbeat
-    ticker = setInterval(beat, 4000);
-  }
   try {
     if (!API_KEY) {
       throw new Error('AURIXEL_API_KEY is not set. Add your ck-… key (from app.joyviz.ai/app/keys) to the MCP server env.');
     }
     if (name === 'generate_image') {
-      const { b64, mime, model } = await generateImage(args);
+      if (!args.prompt || !String(args.prompt).trim()) throw new Error('prompt is required.');
+      const { jobId, useModel } = startJob(args);
       return {
         content: [
-          { type: 'text', text: `Generated with ${model}.` },
+          {
+            type: 'text',
+            text:
+              `Image generation started.\njob_id: ${jobId}\nmodel: ${useModel}\n\n` +
+              `This model typically takes 60–120s. Call get_image_result with this ` +
+              `job_id to fetch the image. If it says "still generating", just call ` +
+              `get_image_result again with the same job_id — each call is fast and ` +
+              `won't time out.`,
+          },
+        ],
+      };
+    }
+    if (name === 'get_image_result') {
+      const jobId = args.job_id || args.jobId;
+      if (!jobId) throw new Error('job_id is required.');
+      const j = await waitForJob(String(jobId), POLL_WAIT_MS);
+      if (!j) throw new Error(`Unknown job_id: ${jobId}. Start a new generation with generate_image.`);
+      if (j.status === 'pending') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Still generating (${elapsedSec(j)}s elapsed). Call get_image_result again with job_id ${jobId} in a few seconds.`,
+            },
+          ],
+        };
+      }
+      if (j.status === 'error') {
+        const msg = j.error;
+        jobs.delete(String(jobId));
+        return { content: [{ type: 'text', text: `Error: ${msg}` }], isError: true };
+      }
+      // done
+      const { b64, mime, model } = j;
+      const secs = elapsedSec(j);
+      jobs.delete(String(jobId)); // one-shot fetch; free the image from memory
+      return {
+        content: [
+          { type: 'text', text: `Generated with ${model} (${secs}s).` },
           { type: 'image', data: b64, mimeType: mime },
         ],
       };
@@ -154,10 +257,24 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     throw new Error(`Unknown tool: ${name}`);
   } catch (e) {
     return { content: [{ type: 'text', text: `Error: ${(e && e.message) || String(e)}` }], isError: true };
-  } finally {
-    if (ticker) clearInterval(ticker);
   }
 });
+
+// Light housekeeping: free finished jobs that were never fetched, and fail
+// any job stuck pending past the upstream ceiling. unref() so this timer
+// never keeps the process alive on its own.
+const sweeper = setInterval(() => {
+  const now = Date.now();
+  for (const [id, j] of jobs) {
+    const age = now - j.startedAt;
+    if ((j.status === 'done' || j.status === 'error') && age > 600000) jobs.delete(id);
+    else if (j.status === 'pending' && age > GEN_TIMEOUT_MS + 30000) {
+      j.status = 'error';
+      j.error = 'Generation timed out.';
+    }
+  }
+}, 60000);
+sweeper.unref?.();
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -1,7 +1,8 @@
 // Quick stdio harness: spawn the server, do the MCP handshake, list tools.
 import { spawn } from 'node:child_process';
 
-const p = spawn('node', ['server.js'], {
+const p = spawn(process.execPath, ['server.js'], {
+  cwd: new URL('.', import.meta.url).pathname,
   env: { ...process.env, AURIXEL_API_KEY: 'ck-test' },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
@@ -17,7 +18,7 @@ send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
 setTimeout(() => {
   p.kill();
   console.log('=== STDOUT ===\n' + out);
-  const ok = out.includes('generate_image') && out.includes('list_image_models');
+  const ok = out.includes('generate_image') && out.includes('get_image_result') && out.includes('list_image_models');
   console.log('\nTOOLS REGISTERED OK:', ok);
   process.exit(ok ? 0 : 1);
 }, 2000);
