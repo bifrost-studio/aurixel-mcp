@@ -43,7 +43,7 @@ MCP 宿主 (Claude Desktop / Cursor / Cline / ChatGPT …)
 mcp.bifrostapi.net  ── Node / Streamable HTTP(本仓 http-server.js)
    │   把 MCP tools/call  →  翻译成我们的 REST /v1/*
    ▼
-api.bifrostapi.net  ── Conduit:鉴权 ck-→user + 计费 + 余额
+conduit-api.bifrostapi.net  ── Conduit:鉴权 ck-→user + 计费 + 余额
    ▼
 cpagw → cli-proxy → 上游(Codex / packyapi / antigravity / DashScope …)
 ```

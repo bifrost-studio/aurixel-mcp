@@ -35,7 +35,7 @@ import {
 
 const PORT = Number(process.env.PORT || 8790);
 const BIND = process.env.BIND || '127.0.0.1';
-const BASE_URL = (process.env.BIFROSTAPI_BASE_URL || process.env.AURIXEL_BASE_URL || 'https://api.bifrostapi.net').replace(/\/+$/, '');
+const BASE_URL = (process.env.BIFROSTAPI_BASE_URL || process.env.AURIXEL_BASE_URL || 'https://conduit-api.bifrostapi.net').replace(/\/+$/, '');
 const DEFAULT_IMAGE_MODEL = process.env.BIFROSTAPI_IMAGE_MODEL || process.env.AURIXEL_IMAGE_MODEL || 'gpt-image-2';
 
 // Hard ceiling on a single upstream generation before we give up on it. Sits just

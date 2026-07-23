@@ -8,7 +8,7 @@
  *
  * Config (env):
  *   BIFROSTAPI_API_KEY    required — your ck-… key from www.bifrostapi.net/app/keys
- *   BIFROSTAPI_BASE_URL   optional — gateway base (default api.bifrostapi.net)
+ *   BIFROSTAPI_BASE_URL   optional — gateway base (default conduit-api.bifrostapi.net)
  *   BIFROSTAPI_IMAGE_MODEL optional — default image model (default gpt-image-2)
  *   (legacy AURIXEL_* env names are still accepted as a fallback)
  *
@@ -39,7 +39,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-const BASE_URL = (process.env.BIFROSTAPI_BASE_URL || process.env.AURIXEL_BASE_URL || 'https://api.bifrostapi.net').replace(/\/+$/, '');
+const BASE_URL = (process.env.BIFROSTAPI_BASE_URL || process.env.AURIXEL_BASE_URL || 'https://conduit-api.bifrostapi.net').replace(/\/+$/, '');
 const API_KEY = process.env.BIFROSTAPI_API_KEY || process.env.AURIXEL_API_KEY || '';
 const DEFAULT_IMAGE_MODEL = process.env.BIFROSTAPI_IMAGE_MODEL || process.env.AURIXEL_IMAGE_MODEL || 'gpt-image-2';
 

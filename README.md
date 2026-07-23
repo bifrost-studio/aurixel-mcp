@@ -54,7 +54,7 @@ show the picture once it's ready.
 | Var | Required | Default |
 |-----|----------|---------|
 | `BIFROSTAPI_API_KEY` | ✅ | — |
-| `BIFROSTAPI_BASE_URL` | | `https://api.bifrostapi.net` |
+| `BIFROSTAPI_BASE_URL` | | `https://conduit-api.bifrostapi.net` |
 | `BIFROSTAPI_IMAGE_MODEL` | | `gpt-image-2` |
 
 ## Notes
