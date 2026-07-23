@@ -1,8 +1,8 @@
-# aurixel-mcp
+# bifrostapi-mcp
 
 An [MCP](https://modelcontextprotocol.io) server that lets MCP hosts
 (Claude Desktop, Cursor, Cline, …) generate images through
-**Aurixel** (joyviz.ai). It exposes Aurixel's image models — e.g.
+**BifrostAPI** (bifrostapi.net). It exposes BifrostAPI's image models — e.g.
 `gpt-image-2` — as tools, so you can just ask your assistant to draw
 something and get the picture back.
 
@@ -27,7 +27,7 @@ just ask for a picture and the image arrives when it's ready.
 
 ## Setup
 
-1. Get a `ck-…` API key at <https://app.joyviz.ai/app/keys>.
+1. Get a `ck-…` API key at <https://www.bifrostapi.net/app/keys>.
 2. Add the server to your MCP host config.
 
 **Claude Desktop** (`claude_desktop_config.json`) / **Cursor**
@@ -36,10 +36,10 @@ just ask for a picture and the image arrives when it's ready.
 ```json
 {
   "mcpServers": {
-    "aurixel": {
+    "bifrostapi": {
       "command": "npx",
-      "args": ["-y", "github:bifrost-studio/aurixel-mcp"],
-      "env": { "AURIXEL_API_KEY": "ck-your-key-here" }
+      "args": ["-y", "github:bifrost-studio/bifrostapi-mcp"],
+      "env": { "BIFROSTAPI_API_KEY": "ck-your-key-here" }
     }
   }
 }
@@ -53,12 +53,12 @@ show the picture once it's ready.
 
 | Var | Required | Default |
 |-----|----------|---------|
-| `AURIXEL_API_KEY` | ✅ | — |
-| `AURIXEL_BASE_URL` | | `https://conduit-api.joyviz.ai` |
-| `AURIXEL_IMAGE_MODEL` | | `gpt-image-2` |
+| `BIFROSTAPI_API_KEY` | ✅ | — |
+| `BIFROSTAPI_BASE_URL` | | `https://api.bifrostapi.net` |
+| `BIFROSTAPI_IMAGE_MODEL` | | `gpt-image-2` |
 
 ## Notes
 
 - Transport: stdio (standard for locally-run MCP servers).
-- Billing follows your Aurixel account — each image is charged to the
+- Billing follows your BifrostAPI account — each image is charged to the
   key you configure.

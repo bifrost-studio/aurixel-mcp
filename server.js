@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * aurixel-mcp — an MCP server that exposes Aurixel (joyviz.ai) image
+ * bifrostapi-mcp — an MCP server that exposes BifrostAPI (bifrostapi.net) image
  * generation as a tool, so MCP hosts (Claude Desktop, Cursor, Cline, …)
- * can ask Aurixel to draw pictures.
+ * can ask BifrostAPI to draw pictures.
  *
  * Transport: stdio (the standard for locally-run MCP servers).
  *
  * Config (env):
- *   AURIXEL_API_KEY    required — your ck-… key from app.joyviz.ai/app/keys
- *   AURIXEL_BASE_URL   optional — gateway base (default conduit-api.joyviz.ai)
- *   AURIXEL_IMAGE_MODEL optional — default image model (default gpt-image-2)
+ *   BIFROSTAPI_API_KEY    required — your ck-… key from www.bifrostapi.net/app/keys
+ *   BIFROSTAPI_BASE_URL   optional — gateway base (default api.bifrostapi.net)
+ *   BIFROSTAPI_IMAGE_MODEL optional — default image model (default gpt-image-2)
+ *   (legacy AURIXEL_* env names are still accepted as a fallback)
  *
  * Tools:
  *   generate_image(prompt, model?, size?)  → starts a job, returns a job_id
@@ -38,12 +39,16 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-const BASE_URL = (process.env.AURIXEL_BASE_URL || 'https://conduit-api.joyviz.ai').replace(/\/+$/, '');
-const API_KEY = process.env.AURIXEL_API_KEY || '';
-const DEFAULT_IMAGE_MODEL = process.env.AURIXEL_IMAGE_MODEL || 'gpt-image-2';
+const BASE_URL = (process.env.BIFROSTAPI_BASE_URL || process.env.AURIXEL_BASE_URL || 'https://api.bifrostapi.net').replace(/\/+$/, '');
+const API_KEY = process.env.BIFROSTAPI_API_KEY || process.env.AURIXEL_API_KEY || '';
+const DEFAULT_IMAGE_MODEL = process.env.BIFROSTAPI_IMAGE_MODEL || process.env.AURIXEL_IMAGE_MODEL || 'gpt-image-2';
 
-// Hard ceiling on a single upstream generation before we give up on it.
-const GEN_TIMEOUT_MS = 180000;
+// Hard ceiling on a single upstream generation before we give up on it. Sits just
+// ABOVE cpagw's image cap (CPA_IMAGE_TIMEOUT_SEC, default 420s) so we never abort a
+// request cpagw would still finish + bill. gpt-image-2 runs ~50-270s (p90 ~170s); the
+// old 180s ceiling aborted the slow tail with "This operation was aborted" while the
+// image still generated upstream and got charged (paid-for-nothing).
+const GEN_TIMEOUT_MS = 430000;
 // How long get_image_result waits in-call for a pending job before
 // returning "still generating". Must stay comfortably under the host's
 // ~60s tool-call timeout so the poll itself never times out. Picking 30s
@@ -58,7 +63,7 @@ const TOOLS = [
   {
     name: 'generate_image',
     description:
-      "Start generating an image from a text prompt using Aurixel's image " +
+      "Start generating an image from a text prompt using BifrostAPI's image " +
       'models (e.g. gpt-image-2). Returns a job_id immediately (generation ' +
       'runs in the background and typically takes 60–120s). Then call ' +
       'get_image_result with the job_id to fetch the finished image. Use ' +
@@ -92,7 +97,7 @@ const TOOLS = [
   },
   {
     name: 'list_image_models',
-    description: 'List the image-generation models available on Aurixel that you can pass to generate_image.',
+    description: 'List the image-generation models available on BifrostAPI that you can pass to generate_image.',
     inputSchema: { type: 'object', properties: {} },
   },
 ];
@@ -190,7 +195,7 @@ async function listImageModels() {
 }
 
 const server = new Server(
-  { name: 'aurixel', version: '0.2.0' },
+  { name: 'bifrostapi', version: '0.2.0' },
   { capabilities: { tools: {} } },
 );
 
@@ -200,7 +205,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
   try {
     if (!API_KEY) {
-      throw new Error('AURIXEL_API_KEY is not set. Add your ck-… key (from app.joyviz.ai/app/keys) to the MCP server env.');
+      throw new Error('BIFROSTAPI_API_KEY is not set. Add your ck-… key (from www.bifrostapi.net/app/keys) to the MCP server env.');
     }
     if (name === 'generate_image') {
       if (!args.prompt || !String(args.prompt).trim()) throw new Error('prompt is required.');
@@ -252,7 +257,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     if (name === 'list_image_models') {
       const list = await listImageModels();
-      return { content: [{ type: 'text', text: 'Aurixel image models:\n' + list.map((m) => `- ${m}`).join('\n') }] };
+      return { content: [{ type: 'text', text: 'BifrostAPI image models:\n' + list.map((m) => `- ${m}`).join('\n') }] };
     }
     throw new Error(`Unknown tool: ${name}`);
   } catch (e) {
@@ -278,4 +283,4 @@ sweeper.unref?.();
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`[aurixel-mcp] ready · base=${BASE_URL} · key=${API_KEY ? 'set' : 'MISSING'} · model=${DEFAULT_IMAGE_MODEL}`);
+console.error(`[bifrostapi-mcp] ready · base=${BASE_URL} · key=${API_KEY ? 'set' : 'MISSING'} · model=${DEFAULT_IMAGE_MODEL}`);

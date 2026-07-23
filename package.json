@@ -1,18 +1,24 @@
 {
-  "name": "aurixel-mcp",
-  "version": "0.2.0",
-  "description": "MCP server that exposes Aurixel (joyviz.ai) image generation as a tool for Claude Desktop, Cursor, and other MCP hosts. Async job + poll so long generations never hit the host's tool-call timeout.",
+  "name": "bifrostapi-mcp",
+  "version": "0.3.0",
+  "description": "MCP server exposing BifrostAPI image generation as a tool. Two transports: stdio (server.js, runs locally, key from env) and remote Streamable HTTP (http-server.js, hosted multi-tenant endpoint, key per-request). Async job + poll so long generations never hit the host's tool-call timeout.",
   "type": "module",
   "bin": {
-    "aurixel-mcp": "server.js"
+    "bifrostapi-mcp": "server.js",
+    "bifrostapi-mcp-http": "http-server.js"
   },
   "files": [
-    "server.js"
+    "server.js",
+    "http-server.js"
   ],
+  "scripts": {
+    "start:http": "node http-server.js"
+  },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "express": "^5.2.1"
   }
 }
